@@ -1,0 +1,45 @@
+一, 创建虚拟环境
+【A】 系统终端：
+cd /usr/src
+wget https://www.python.org/ftp/python/3.11.12/Python-3.11.12.tgz
+tar -xzvf Python-3.11.12.tgz
+cd Python-3.11.12
+./configure
+make -j$(nproc)
+make altinstall
+
+【B】 vscode TERMINAL 创建python虚拟环境:
+/usr/local/bin/python3.11 --version
+/usr/local/bin/python3.11 -m venv .venv  
+
+ls .venv
+bin  include  lib  lib64  pyvenv.cfg
+
+激活虚拟环境：
+source .venv/bin/activate
+
+退出虚拟环境
+deactivate
+
+
+二, 配置本地虚拟环境
+.vscode  settings.json 配置
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "terminal.integrated.env.linux": {
+        "PATH": "${workspaceFolder}/.venv/bin:${env:PATH}"
+    },
+    "python.terminal.activateEnvironment": true,
+    // 新加 terminal profile
+    "terminal.integrated.profiles.linux": {
+        "bash_with_venv": {
+            "path": "/bin/bash",
+            "args": ["-c", "source ${workspaceFolder}/.venv/bin/activate && exec bash"]
+            
+        }
+    },
+    "terminal.integrated.defaultProfile.linux": "bash_with_venv"
+}
+
+
+
