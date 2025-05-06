@@ -74,15 +74,15 @@ async def create_sample_file():
     return sample_file_path
 
 # 自定义 selector 函数，基于对话历史选择下一个发言者
-def selector_func(messages: Sequence[BaseAgentEvent | BaseChatMessage]) -> str | None:
-    if not messages:
-        return "http_agent"  # 初始发言者为 http_agent
-    last_message = messages[-1].to_text()
-    if "base64" in last_message.lower():
-        return "http_agent"  # 如果提到 base64，选择 http_agent
-    if "file" in last_message.lower() or "read" in last_message.lower():
-        return "file_agent"  # 如果提到 file 或 read，选择 file_agent
-    return None  # 否则让模型决定
+# def selector_func(messages: Sequence[BaseAgentEvent | BaseChatMessage]) -> str | None:
+#     if not messages:
+#         return "http_agent"  # 初始发言者为 http_agent
+#     last_message = messages[-1].to_text()
+#     if "base64" in last_message.lower():
+#         return "http_agent"  # 如果提到 base64，选择 http_agent
+#     if "file" in last_message.lower() or "read" in last_message.lower():
+#         return "file_agent"  # 如果提到 file 或 read，选择 file_agent
+#     return None  # 否则让模型决定
 
 
 # 创建文件读取工具
@@ -124,15 +124,43 @@ async def main():
         description="读取文件内容的代理",
     )
 
+    # 修改后的summary_agent定义
+    summary_agent = AssistantAgent(
+        name="summary_agent",
+        model_client=model_client,
+        description="生成任务汇总报告",
+        system_message="""请根据以下规则生成任务总结报告：
+
+        # 报告生成规则
+        1. 对每个独立任务的结果单独列出
+        2. 每个任务结果包含：
+        - 任务类型/描述
+        - 输入参数
+        - 输出结果
+        3. 保持结果数据的原始格式
+        4. 使用Markdown格式组织报告
+
+        # 输出示例格式
+        ## [任务1描述]
+        - 输入: [参数]
+        - 输出: [原始结果]
+
+        ## [任务2描述]
+        - 输入: [参数]
+        - 输出: [原始结果]
+
+        最后发送TERMINATE""",
+    )
+
     # 创建一个样本文件供 FileSurfer 读取
     sample_file_path = await create_sample_file()
 
     # 创建 SelectorGroupChat 团队
     termination = TextMentionTermination("TERMINATE")
     team = SelectorGroupChat(
-        participants=[http_agent, file_agent],
+        participants=[http_agent, file_agent, summary_agent],
         model_client=model_client,
-        selector_func=selector_func,
+        # selector_func=selector_func,
         termination_condition=termination,
         max_turns=10,
         selector_prompt="你在一个角色扮演游戏中。可用的角色：\n{roles}\n请阅读以下对话历史，然后从 {participants} 中选择下一个发言的角色，仅返回角色名称。\n\n{history}\n\n请根据以上对话选择下一个发言角色，仅返回角色名称。",
@@ -140,9 +168,28 @@ async def main():
 
     # 运行团队，展示两个代理的能力
     print("=== SelectorGroupChat Demo 开始 ===")
-    tasks = f"""
-        请解码 base64 值 'SGVsbG8sIFdvcmxkIQ==', 并且读取文件 {sample_file_path} 的内容
-    """
+    # 修改后的任务指令模板
+    TASK_TEMPLATE = """请完成以下任务并生成报告：
+
+    {task_list}
+
+    # 报告要求
+    1. 保持每个任务的原始输出
+    2. 不要合并或修改实际任务结果
+    3. 按任务执行顺序列出结果"""
+
+    # 使用时动态生成任务指令
+    def generate_task_instruction(tasks: list):
+        task_items = "\n".join(f"{i+1}. {task}" for i, task in enumerate(tasks))
+        return TASK_TEMPLATE.format(task_list=task_items)
+
+    # 示例任务列表
+    tasks = generate_task_instruction([
+        "解码base64值 'SGVsbG8sIFdvcmxkIQ=='",
+        f"读取文件 {sample_file_path} 的内容",
+        # "验证解码结果应为'Hello, World!'",
+        # "验证文件内容应为'这是一个本地测试文件'"
+    ])
     
     stream = team.run_stream(task=tasks)
     async for event in stream:
