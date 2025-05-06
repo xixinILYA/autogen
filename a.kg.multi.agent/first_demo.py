@@ -26,6 +26,7 @@ async def main() -> None:
         else:
             return "Incorrect!"
 
+    # TODO 依赖输入的大模型历史记忆，可能导致不稳定问题
     agent1 = AssistantAgent(
         "Agent1",
         model_client,

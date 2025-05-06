@@ -71,7 +71,6 @@ def get_machine_info(ip):
     machineclass=tmp['data'][0]['machineClass'] if tmp['data'] else 'F'
     return machinetype,machineclass
 
-
 def exe_dify(cpu_usg, mem_usg, cpu_hardware, mem_hardware, machine_type, machine_class):
     d = {
         'cpu_usg': cpu_usg,
