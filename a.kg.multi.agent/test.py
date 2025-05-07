@@ -9,6 +9,8 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.teams import SelectorGroupChat
 from autogen_agentchat.conditions import TextMentionTermination
 from autogen_agentchat.ui import Console
+from autogen_ext.tools.http import HttpTool
+from autogen_core.tools import FunctionTool
 from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage
 
 # 配置日志
@@ -57,6 +59,53 @@ async def get_mcp_tools(server_params: SseServerParams, timeout: float = 30.0) -
         logger.error(f"Failed to retrieve tools from {server_params.url}: {str(e)}")
         return []
 
+
+# 定义 HttpTool 的 JSON Schema，用于 base64 解码
+base64_schema = {
+    "type": "object",
+    "properties": {
+        "value": {"type": "string", "description": "要解码的 base64 值"},
+    },
+    "required": ["value"],
+}
+
+# 创建 HttpTool，用于访问 httpbin.org 的 base64 解码 API
+base64_tool = HttpTool(
+    name="base64_decode",
+    description="解码 base64 值的工具",
+    scheme="https",
+    host="httpbin.org",
+    port=443,
+    path="/base64/{value}",
+    method="GET",
+    json_schema=base64_schema,
+    return_type="text",
+)
+
+
+# 创建文件读取工具
+def file_read(file_path: str) -> str:
+    """读取指定文件的内容"""
+    if not file_path:
+        return "Error: File path not provided."
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return content
+    except FileNotFoundError:
+        return f"Error: File '{file_path}' not found."
+    except Exception as e:
+        return f"Error reading file: {str(e)}"
+
+
+# 使用 FunctionTool 包装文件读取函数
+file_read_tool = FunctionTool(
+    func=file_read,
+    name="local_file_read",
+    description="读取指定本地文件的内容",
+)
+
+
 async def main() -> None:
     # 配置 MCP 服务的 SSE 连接参数
     local_server_params = SseServerParams(
@@ -101,37 +150,38 @@ async def main() -> None:
         ),
     )
 
-    # HTTP 请求 Agent
-    http_agent = AssistantAgent(
-        name="http_agent",
+
+    # toolkit_agent 代理
+    toolkit_agent = AssistantAgent(
+        name="toolkit_agent",
         model_client=model_client,
-        description="用于执行 HTTP 请求的 agent",
+        tools=[file_read_tool, base64_tool, get_host_info_by_ip, get_cost_advice],  # 使用 FunctionTool 实例
+        description="读取本地文件内容, 解码base64",
         system_message=(
-            "你专职执行其他 agent 请求的 HTTP 请求，返回结构化响应。"
-            "不进行评估和推理，结果尽量简洁明了。"
-        )
+            "你是多面tools工具助手，专门根据用户需求调用最合适的工具。你的任务是："
+            "1. 分析用户提供的任务或问题；"
+            "2. 从可用的工具列表中选择最适合的工具；"
+            "3. 清晰地列出你的思考过程，包括为什么选择该工具以及它如何解决任务；"
+            "4. 执行选定的工具并返回其结果作为答案；"
+            "5. 如果没有可用的工具或没有适合的工具，返回空消息（不提供任何回答）。"
+            "约束："
+            "- 答案必须严格来自tools工具的返回结果，不得自行生成或推测答案。"
+            "- 如果无法找到合适的工具，明确说明原因并返回空消息。"
+            "请以简洁、逻辑清晰的方式回复，确保用户能够理解你的选择依据。"
+        ),
     )
 
-    # 本地文件读取 Agent
-    file_agent = AssistantAgent(
-        name="file_agent",
-        model_client=model_client,
-        description="专门用于读取本地文件内容的 agent",
-        system_message=(
-            "你专职读取其他 agent 请求的本地文件，原样返回内容，不进行解释或修改。"
-        )
-    )
 
     # 项目信息读取 Agent
-    project_reader_agent = AssistantAgent(
-        name="project_reader",
-        model_client=model_client,
-        description="汇总信息（通过 file_agent / http_agent / mcp_agent）",
-        system_message=(
-            "你是信息收集专家，可以请求 file_agent / http_agent / mcp_agent 来获取数据。"
-            "你的任务是提供准确的项目信息，而不是分析这些信息。"
-        )
-    )
+    # project_reader_agent = AssistantAgent(
+    #     name="project_reader",
+    #     model_client=model_client,
+    #     description="汇总信息（通过 file_agent / http_agent / mcp_agent）",
+    #     system_message=(
+    #         "你是信息收集专家，可以请求 file_agent / http_agent / mcp_agent 来获取数据。"
+    #         "你的任务是提供准确的项目信息，而不是分析这些信息。"
+    #     )
+    # )
     
     report_generator_agent = AssistantAgent(
         name="report_generator",
@@ -152,7 +202,7 @@ async def main() -> None:
         description="分析项目成本",
         system_message="""
             你负责分析项目的资源、基础设施成本、并给出优化建议。
-            你通过 toolkit agent 请求数据，自己不直接读取文件或接口。
+            你通过 toolkit_agent, mcp_agent 获取任务所需的数据做分析。
         """
         )
 
@@ -162,7 +212,7 @@ async def main() -> None:
         description="评估项目稳定性",
         system_message="""
             你负责根据日志、故障记录、重启历史等数据分析系统稳定性。
-            必要时通过 toolkit agent 或 project_reader 请求数据。
+            必要时通过 toolkit_agent, mcp_agent 请求任务所需的数据做分析。
         """
         )
 
@@ -172,7 +222,7 @@ async def main() -> None:
         description="评估项目安全性",
         system_message="""
             你负责根据漏洞扫描、配置安全性、访问控制等角度评估项目的安全。
-            你可以请求 toolkit agent 获取漏洞接口或配置文件。
+            你可以请求 toolkit_agent, mcp_agent 获取漏洞接口或配置文件。
         """
     )
 
@@ -180,8 +230,7 @@ async def main() -> None:
     # 创建团队
     agents = [
         mcp_agent,
-        http_agent,
-        project_reader_agent,
+        toolkit_agent,
         cost_agent,
         stability_agent,
         security_agent,
@@ -200,7 +249,7 @@ async def main() -> None:
             请根据以下对话内容判断下一个应当发言的角色（从 {participants} 中选择）：
             - 哪个角色能有效推动话题深入？
             - 是否需要某角色提供数据、分析或总结？
-            - 是否已有结论可交由 report_generator 输出最终报告？
+            - 各角色给出的结论是否可交由 report_generator 输出最终报告？
 
             {history}
 
@@ -210,13 +259,12 @@ async def main() -> None:
 
     # 执行任务
     task = """
-        你们是一组虚拟专家团队，正在对一个软件开发项目进行全面评估。团队由以下4个角色组成：
+        你们是一组虚拟专家团队，正在对一个软件开发项目进行全面评估。团队由以下3个角色组成：
         - 成本分析专家（Cost Analyst）
-        - 开发效率顾问（Efficiency Expert）
         - 系统稳定性顾问（Stability Specialist）
         - 安全性专家（Security Analyst）
 
-        你们的任务是从各自角度出发，评估该项目在成本、开发效率、系统稳定性和安全性方面的表现，并在必要时主动向其他专家提问或请求补充信息。
+        你们的任务是从各自角度出发，评估该项目在成本、系统稳定性和安全性方面的表现，并在必要时主动向其他专家提问或请求补充信息。
 
         最终目标是生成一份结构化的《架构评审综合报告》，内容包括：
         1. 各角色对该项目的专业分析
