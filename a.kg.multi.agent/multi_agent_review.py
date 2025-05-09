@@ -50,7 +50,7 @@ async def get_mcp_tools(server_params: SseServerParams, timeout: float = 30.0) -
             tools = await mcp_server_tools(server_params)
             logger.info(f"Successfully retrieved {len(tools)} tools from {server_params.url}")
             for tool in tools:
-                logger.info(f"Tool name: {tool.name}, description: {tool.description}")
+                logger.warning(f"Tool name: {tool.name}, description: {tool.description}")
             return tools
     except asyncio.TimeoutError:
         logger.error(f"Timeout after {timeout}s while retrieving tools from {server_params.url}")
@@ -207,12 +207,15 @@ async def main() -> None:
         description="读取本地文件内容, 解码base64, 获取主机信息, 获取成本信息, 包含所有 MCP 工具",
         system_message=(
             "你是多面tools工具助手，能配合专家角色的要求调用最合适的工具。\n"
+            "注意：getRangeMetricData 工具不支持 `cpu_usage`；如果任务需要查看 CPU 利用率，请使用 `new_cpu_avg`。\n"
+            "注意：getRangeMetricData 工具不支持 `mem_usage`；如果任务需要查看 CPU 利用率，请使用 `new_mem_avg`。\n"
             "【工作方式】：\n"
             "1. 分析任务对话最后一个专家角色要求的任务；\n"
             "2. 从可用的工具列表中选择最适合该任务的工具；\n"
             "3. 如果没有可用的工具或没有适合的工具，直接返回空消息（暂无工具可用）；\n"
-            "4. 清晰地列出你的思考过程，包括为什么选择该工具以及它如何解决任务；\n"
-            "5. 执行选定的工具并返回其结果作为答案。\n"
+            "4. 如果当前任务可被进一步细化，请主动调用工具检查是否可补全数据\n"
+            "5. 清晰地列出你的思考过程，包括为什么选择该工具以及它如何解决任务；\n"
+            "6. 执行选定的工具并返回其结果作为答案。\n"
             
             "【约束】：\n"
             "- 所有答案必须来源于实际工具返回的结果，禁止推测或生成；\n"
@@ -266,7 +269,7 @@ async def main() -> None:
         description="评估项目稳定性并给出处置建议",
         system_message="""
             你负责根据日志、故障记录、重启历史等数据分析系统稳定性。
-            必要时通过 toolkit_agent 请求任务所需的数据做分析。
+            你优先通过 toolkit_agent 请求任务所需的数据做分析。
         """
         )
 
@@ -276,12 +279,12 @@ async def main() -> None:
         description="评估项目安全性并给出处置建议",
         system_message="""
             你负责根据漏洞扫描、配置安全性、访问控制等角度评估项目的安全。
-            你可以请求 toolkit_agent 获取漏洞接口或配置文件。
+            你优先通过 toolkit_agent 获取漏洞接口或配置文件。
         """
     )
 
 
-    mention_termination = TextMentionTermination("MISSION COMPELET")
+    mention_termination = TextMentionTermination("MISSION COMPLETE")
 
 
     # 创建团队
@@ -325,20 +328,15 @@ async def main() -> None:
 
     # 执行任务
     task = """
-        你们是一组虚拟专家团队，正在对一个软件开发项目(该项目的ip地址是 10.5.140.9)进行全面评估。
+        你们是一组虚拟专家团队，正在对一个软件开发项目(该项目的ip地址是 10.16.6.152)进行全面评估。
         团队由以下3个角色组成：
         - 成本分析专家（cost_analyst）
         - 系统稳定性顾问（stability_analyst）
         - 安全性专家（security_analyst）
 
-        你们的任务是从各自角度出发，评估该项目在成本、系统稳定性和安全性方面的表现，并在必要时主动向其他专家提问或请求补充信息。
+        你们的任务是从各自角度出发，评估该项目在成本、系统稳定性和安全性方面的表现，并在必要时主动向其他专家征求意见。
 
-        最终目标是由 report_generator 生成一份结构化的《架构评审综合报告》，内容包括：
-        1. 各角色对该项目的专业分析
-        2. 各维度存在的风险或优化建议
-        3. 一份结论性评估和整体建议
-
-        请开始评估任务。
+        最终由 report_generator 角色，根据专家团队各自领域的建议，生成一份结构化的《架构评审综合报告》。
     """
     try:
         async with asyncio.timeout(300.0):
