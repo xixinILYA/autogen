@@ -246,7 +246,7 @@ async def main():
     stability_agent = AssistantAgent(
         name="stability_analyst",
         model_client=model_client,
-        tools=mcp_stability_tools + get_stability_info,
+        tools=mcp_stability_tools + [get_stability_info],
         description="评估项目稳定性并给出处置建议",
         system_message="""
             你是负责评估系统稳定性的专家。
@@ -265,7 +265,7 @@ async def main():
     security_agent = AssistantAgent(
         name="security_analyst",
         model_client=model_client,
-        tools=mcp_security_tools + get_security_info,
+        tools=mcp_security_tools + [get_security_info],
         description="评估项目安全性并给出处置建议",
         system_message="""
             你是负责评估系统安全性的专家。
