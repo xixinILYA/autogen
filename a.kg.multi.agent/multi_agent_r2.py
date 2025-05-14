@@ -22,6 +22,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 环境配置: 
+# 测试->生产
+if os.getenv("aKl8saxxDh9v7b_Kugou_ML_Namespace_Test") == "breezejiang":
+    g_dify_chatmsg_url = "http://dify.opd.kugou.net/v1/chat-messages"
+    g_aiops_api_url = "http://machinelearning.opd.kugou.net/b-aiops-ml/v1/"
+# 生产
+else:
+    g_dify_chatmsg_url = "http://dify.kgidc.cn/v1/chat-messages"
+    g_aiops_api_url = "http://opdproxy.kgidc.cn/b-aiops-ml/v1/"
+    
+
+# 大模型 LLM 使用deepseek
 G_DEEPSEEK_KEY = os.environ.get('DPSK_KEY')
 if not G_DEEPSEEK_KEY:
     logger.error("DPSK_KEY environment variable not set")
@@ -34,7 +46,7 @@ model_client = OpenAIChatCompletionClient(
     model_info={"vision": False, "function_calling": True, "structured_output": True, "json_output": True, "family": "unknown"}
 )
 
-# Tool definitions
+# 工具列表定义：Tool definitions
 async def get_mcp_tools(server_params: SseServerParams, timeout: float = 30.0) -> list:
     """获取 MCP 工具，处理服务不可用和超时的情况"""
     try:
@@ -232,7 +244,7 @@ async def main():
         system_message="""
             你是负责分析项目资源成本的专家。
             你的职责是：
-            - 调用 get_cost_advice 等工具获取项目相关的 Redis, K8S, Mysql, 主机CVM 等资源、硬件配置相关的数据；
+            - 调用 get_host_info 等工具获取项目相关的 Redis, K8S, Mysql, 主机CVM 等资源、硬件配置相关的数据；
             - 分析成本使用情况，调用 get_cost_advice工具 获取优化建议；
             - 仅使用工具返回的数据作为依据，清晰地陈述你的分析过程、数据来源和最终的优化建议。
 
