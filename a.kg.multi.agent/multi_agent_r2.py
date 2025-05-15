@@ -10,6 +10,10 @@ from autogen_agentchat.conditions import TextMentionTermination
 from autogen_agentchat.ui import Console
 from autogen_ext.tools.http import HttpTool
 from autogen_core.tools import FunctionTool
+from pydantic import BaseModel
+from typing import Any
+from autogen_core import CancellationToken  # 如果你的包没有，再用 autogen_agentchat.conditions 或 cancellation_token 路径
+
 
 # Logging config
 logging.basicConfig(
@@ -114,14 +118,14 @@ get_host_info = HttpTool(
     scheme="http",
     host=g_aiops_api_host,
     port=80,
-    path="/b-aiops-ml/v1/GetSshipCpumemInfo?sship={ip}",  # API路径，确保{ip}路径参数被正确处理
+    path="/b-aiops-ml/v1/GetSshipCpumemInfo",  # API路径，确保{ip}路径参数被正确处理
     method="GET",
     json_schema={
         "type": "object",
         "properties": {
-            "ip": {"type": "string", "description": "要查询的主机ip地址"}
+            "sship": {"type": "string", "description": "要查询的主机ip地址"}
         },
-        "required": ["ip"]
+        "required": ["sship"]
     },
     return_type="json",
 )
