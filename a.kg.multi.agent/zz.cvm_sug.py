@@ -68,59 +68,40 @@ def get_machine_info(ip):
     return machinetype,machineclass
 
 
-def exe_dify(cpu_usg, mem_usg, cpu_hardware, mem_hardware, machine_type, machine_class):
-    d = {
-        'cpu_usg': cpu_usg,
-        'mem_usg': mem_usg,
-        'cpu_hardware': cpu_hardware,
-        'mem_hardware': mem_hardware,
-        'machine_type': machine_type,
-        'machine_class': machine_class
+def exe_dify():
+    data = {
+        "inputs": {
+            "cpu": "32",
+            "mem": "64",
+            "cpu_precent": "5.87",
+            "mem_precent": "43.21",
+            "machine_type": "CVM_TX",
+            "machine_specification": "S5.8XLARGE64"
+        },
+        "response_mode": "blocking",
+        "user": "pipeline"
     }
-    flag=0
-    f_vars = [key for key, value in d.items() if value == 'F']
-    if f_vars:
-        flag=1
-        return ({
-            "result": f"以下信息未成功获取: {', '.join(f_vars)}",
-            "s_machine": "",
-            "d_machine": "",
-            "deailt_result": ""
-        },flag)
+
+    headers = {
+        'Host': 'dify.opd.kugou.net',
+        'Authorization': 'Bearer app-0E73Ys4ywhawXOM7LmiGgVqa',
+        'Content-Type': 'application/json'
+    }
+
+    response = requests.post('http://dify.opd.kugou.net/v1/workflows/run', headers=headers, json=data)
+
+    ret = {}
+    if response.status_code != 200:
+        ret["error"] = str(response.content)
+        return (ret,1)
     else:
-        data = {
-            "inputs": {
-                "cpu": cpu_hardware,
-                "mem": mem_hardware,
-                "cpu_precent": cpu_usg,
-                "mem_precent": mem_usg,
-                "machine_type": machine_type,
-                "machine_specification": machine_class
-            },
-            "response_mode": "blocking",
-            "user": "pipeline"
-        }
-
-        headers = {
-            'Host': 'dify.kgidc.cn',
-            'Authorization': '{{sk.cvmonlinedify}}',
-            'Content-Type': 'application/json'
-        }
-
-        response = requests.post('http://dify.kgidc.cn/v1/workflows/run', headers=headers, json=data)
-
-        ret = {}
-        if response.status_code != 200:
-            ret["error"] = str(response.content)
-            return (ret,flag)
-        else:
-            return (response.json(),flag)
+        return (response.json(),0)
 
 if __name__ == "__main__":
-    cpu_usg, mem_usg = get_cpu_mem_usage(sship)
-    cpu_hardware, mem_hardware = get_hardware_specs(sship)
-    machine_type,machine_class= get_machine_info(sship)
-    ret,flag=exe_dify(cpu_usg, mem_usg, cpu_hardware, mem_hardware, machine_type, machine_class)
+    # cpu_usg, mem_usg = get_cpu_mem_usage(sship)
+    # cpu_hardware, mem_hardware = get_hardware_specs(sship)
+    # machine_type,machine_class= get_machine_info(sship)
+    ret,flag=exe_dify()
     if flag==0:
         ret_str = json.dumps(ret, ensure_ascii=False)
         ret_dict = json.loads(ret_str)
@@ -129,7 +110,7 @@ if __name__ == "__main__":
         s_machine = outputs["s_machine"]
         d_machine = outputs["d_machine"]
         deailt_result = outputs["deailt_result"]
-        print("当前IP:",sship)
+        # print("当前IP:",sship)
         print("当前机型:", s_machine)
         print("目标机型:", d_machine)
         print("\n")

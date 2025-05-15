@@ -211,7 +211,7 @@ class HttpTool(BaseTool[BaseModel, Any], Component[HttpToolConfig]):
             port=self.server_params.port,
             path=path,
         )
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             match self.server_params.method:
                 case "GET":
                     response = await client.get(url, headers=self.server_params.headers, params=model_dump)

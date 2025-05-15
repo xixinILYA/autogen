@@ -179,23 +179,68 @@ get_cost_advice = HttpTool(
 
 
 # 稳定性相关的 http 工具
-get_stability_info = HttpTool(
-    name="get_stability_info",
-    description="根据 IP 地址查询主机的稳定性信息，如负载波动、故障率等",
+get_rmsid_info = HttpTool(
+    name="get_rmsid_info",
+    description="根据 rmsid 查询项目的 资源使用情况",
     scheme="http",
-    host="192.168.58.14",
-    port=8001,
-    path="/api/stability/{ip}",
+    host=g_aiops_api_host,
+    port=80,
+    path="/b-aiops-ml/v1/GetRmsidInfo",
     method="GET",
     json_schema={
         "type": "object",
         "properties": {
-            "ip": {"type": "string", "description": "目标主机的 IP 地址"}
+            "rmsid": {"type": "string", "description": "要查询的rmsid"}
         },
-        "required": ["ip"]
+        "required": ["rmsid"]
     },
     return_type="json",
 )
+
+
+get_stability_advice = HttpTool(
+    name="get_stability_advice",
+    description="根据主机和集群资源使用情况，生成稳定性优化建议（适用于稳定性分析）",
+    scheme="http",
+    host=g_dify_workflow_host,
+    port=80,
+    path="/v1/workflows/run",
+    method="POST",
+    json_schema={
+        "type": "object",
+        "properties": {
+            "inputs": {
+                "type": "object",
+                "description": "请求的输入参数",
+                "properties": {
+                    "data_info": {
+                        "type": "string",
+                        "description": "包含IDC和Kubernetes资源使用情况的JSON字符串"
+                    }
+                },
+                "required": ["data_info"]
+            },
+            "response_mode": {
+                "type": "string",
+                "description": "响应模式",
+                "enum": ["blocking", "streaming"],
+                "default": "blocking"
+            },
+            "user": {
+                "type": "string",
+                "description": "请求发起的用户标识",
+                "default": "pipeline"
+            }
+        },
+        "required": ["inputs", "response_mode", "user"]
+    },
+    headers={
+        'Authorization': 'Bearer app-EhbX9cVwhoZ7kVrISoYO6c1d',
+        'Content-Type': 'application/json'
+    },
+    return_type="json",
+)
+
 
 # 安全相关的 http 工具
 get_security_info = HttpTool(
@@ -235,13 +280,13 @@ async def main():
     cost_agent = AssistantAgent(
         name="cost_analyst",
         model_client=model_client,
-        tools=mcp_cost_tools + [get_host_info, get_cost_advice],
+        tools=mcp_cost_tools + [get_rmsid_info, get_host_info, get_cost_advice],
         description="分析项目成本并给出优化建议，能够获取项目资源信息、调用成本建议服务",
         system_message="""
             你是负责分析项目资源成本的专家。
             你的职责是：
-            - 调用 get_host_info 等工具获取项目相关的 Redis、K8S、Mysql、主机CVM 等资源、硬件配置相关的数据；
-            - 分析成本使用情况，调用 get_cost_advice工具 获取优化建议；
+            - 调用 调用 get_rmsid_info 工具获取项目信息；get_host_info 工具(参数来自 get_rmsid_info 响应的 ipList 列表)获取项目相关的 Redis、K8S、Mysql、主机CVM 等资源、硬件配置相关的数据；
+            - 继续分析成本使用情况，调用 get_cost_advice工具 获取优化建议；
             - 仅使用工具返回的数据作为依据，清晰地陈述你的分析过程、数据来源和最终的优化建议。
 
             注意：
@@ -254,12 +299,12 @@ async def main():
     stability_agent = AssistantAgent(
         name="stability_analyst",
         model_client=model_client,
-        tools=mcp_stability_tools + [get_stability_info],
+        tools=mcp_stability_tools + [get_rmsid_info, get_stability_advice],
         description="评估项目稳定性并给出处置建议",
         system_message="""
             你是负责评估系统稳定性的专家。
             你的职责是：
-            - 调用 get_stability_info 等工具获取项目相关的 日志、告警、故障记录等；
+            - 调用 get_rmsid_info 工具获取项目信息；调用 get_stability_advice 工具 (参数 data_info 是 get_rmsid_info 响应的 data 的 dumps 字符串) 获取项目相关的 日志、告警、故障记录等；
             - 分析日志、告警、故障记录等评估系统是否存在不稳定风险；
             - 清晰地陈述你的分析过程、数据来源和最终的优化建议。
 
@@ -279,7 +324,10 @@ async def main():
             你是负责评估系统安全性的专家。
             你的职责是：
             - 调用 get_security_info 等工具获取项目相关的配置文件、访问权限和漏洞等安全信息；
-            - 分析配置文件、访问权限和漏洞等安全信息并给出风险提示和加固建议；
+            - **严格根据工具返回的数据**进行分析；
+            - 如果工具返回的信息不足或返回错误，应明确说明“安全信息缺失”或具体错误，不得推测；
+            - 仅当获取到明确有效的安全信息（如具体漏洞或入侵事件）时，才提供针对性的风险提示和优化建议；
+            - **绝对避免自由发挥或过度假设，尤其是在缺乏数据时**。
 
             注意：
             - 你的职责仅限于“安全性分析”；
@@ -298,7 +346,7 @@ async def main():
             - 整理来自成本分析、安全评估和稳定性分析专家的内容；
             - 如果部分专家声明无法完成任务，你需要将此作为“信息缺失风险”写入报告；
             - 不参与分析，仅组织他们的结论；
-            - 报告包括：分析摘要、风险项、建议、结论（Markdown格式）。
+            - 报告包括：分析摘要、风险项、建议（Markdown格式）。
             - 最后一行以 'MISSION COMPLETE' 结尾。
         """
         )
@@ -396,9 +444,10 @@ async def main():
 
 
     # 执行任务
-    task = """
+    rmsid = 10252
+    task = f"""
         你们是一个虚拟专家团队，当前任务是对一个软件开发项目进行联合评估。
-        【项目关键信息】：该项目的一个核心组件的IP地址是 10.16.6.152。请将此IP作为你们分析的起点和核心关注点。
+        【项目关键信息】：该项目的 rmsid 是 {rmsid}, 请将此 rmsid 作为你们分析的起点和核心关注点。
 
         【团队角色与核心贡献领域】：
         - 成本分析专家 (cost_analyst): 负责从成本效益角度评估项目，并提供资源和预算相关的分析。
@@ -407,7 +456,7 @@ async def main():
         - 报告生成专家 (report_generator): 负责整合所有专家的核心分析意见和关键建议，形成最终的综合评估报告。
 
         【团队协作指南与最终目标】：
-        1.  请各位分析专家（cost_analyst, stability_analyst, security_analyst）围绕项目IP 10.16.6.152，从各自的专业领域出发，进行分析，识别潜在问题或风险，并提出具体的改进建议。
+        1.  请各位分析专家（cost_analyst, stability_analyst, security_analyst）围绕项目 rmsid 是 {rmsid} 的项目，从各自的专业领域出发，进行分析，识别潜在问题或风险，并提出具体的改进建议。
         2.  鼓励你们在评估过程中进行必要的互动，特别是当某个领域的发现或建议可能影响到其他领域时（例如，安全加固措施可能引发成本变动）。
         3.  最终，由 report_generator 专家，根据其他三位专家提供的明确分析结果和核心建议，整合并生成一份结构清晰、重点突出的《架构评审综合报告》。
 
@@ -415,7 +464,7 @@ async def main():
     """
 
     try:
-        async with asyncio.timeout(300.0):
+        async with asyncio.timeout(600.0):
             await Console(team.run_stream(task=task))
     except asyncio.TimeoutError:
         logger.error("Task execution timed out")

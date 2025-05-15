@@ -226,29 +226,29 @@ def fetch_k8s_metrics(projectid, clusterid):
     return cpu_limit, cpu_request, mem_limit, mem_request
 
 
-# def exe_dify(data_info):
-#     data = {
-#         "inputs": {
-#             "data_info": data_info,
-#         },
-#         "response_mode": "blocking",
-#         "user": "pipeline"
-#     }
+def exe_dify(data_info):
+    data = {
+        "inputs": {
+            "data_info": data_info,
+        },
+        "response_mode": "blocking",
+        "user": "pipeline"
+    }
 
-#     headers = {
-#         'Host': 'dify.kgidc.cn',
-#         'Authorization': '{{sk.zhiyudify}}',
-#         'Content-Type': 'application/json'
-#     }
+    headers = {
+        'Host': 'dify.opd.kugou.net',
+        'Authorization': 'Bearer app-EhbX9cVwhoZ7kVrISoYO6c1d',
+        'Content-Type': 'application/json'
+    }
 
-#     response = requests.post('http://dify.kgidc.cn/v1/workflows/run', headers=headers, json=data)
+    response = requests.post('http://dify.opd.kugou.net/v1/workflows/run', headers=headers, json=data)
 
-#     ret = {}
-#     if response.status_code != 200:
-#         ret["error"] = str(response.content)
-#         return ret
-#     else:
-#         return response.json()
+    ret = {}
+    if response.status_code != 200:
+        ret["error"] = str(response.content)
+        return ret
+    else:
+        return response.json()
 
 
 def get_rms_info(rmsId) -> dict:
@@ -307,26 +307,61 @@ def parse_args():
     return parser.parse_args()
 
 if __name__ == "__main__":
-    """主函数，处理 RMS 信息查询和输出"""
-    # 解析命令行参数
-    args = parse_args()
-    rmsId = args.rmsId
+    data = {
+        "idc_info": [
+            {
+                "zone": "腾讯云_华北地区_北京",
+                "cpu": "64",
+                "mem": "128",
+                "ipList": [
+                    "10.5.140.191",
+                    "10.5.140.173"
+                ],
+                "idc_cpu_use": 16.42,
+                "idc_mem_use": 54.9
+            }
+        ],
+        "k8s_info": [
+            {
+                "clusterId": 63,
+                "clusterName": "k8s_cluster_opd_txygzonline",
+                "pod_cpu_request ": 2.0,
+                "pod_cpu_limit ": 4.0,
+                "pod_mem_request": 2.0,
+                "pod_mem_limit ": 4.0,
+                "pod_num": 1,
+                "cpu_limit": 8.0,
+                "cpu_request": 4.0,
+                "mem_limit": 8.19,
+                "mem_request": 4.1,
+                "k8s_cpu_use": 1.51,
+                "k8s_mem_use": 1.11
+            },
+            {
+                "clusterId": 93,
+                "clusterName": "k8s_cluster_opd_txybj6_online_c",
+                "pod_cpu_request ": 2.0,
+                "pod_cpu_limit ": 5.0,
+                "pod_mem_request": 2.0,
+                "pod_mem_limit ": 4.0,
+                "pod_num": 1,
+                "cpu_limit": 30.0,
+                "cpu_request": 12.0,
+                "mem_limit": 24.58,
+                "mem_request": 12.29,
+                "k8s_cpu_use": 17.11,
+                "k8s_mem_use": 3.87
+            }
+        ],
+        "rank": "P3",
+        "rmsId": "10252"
+    }
 
-    def validate_rms_id(rmsId):
-        """验证 rmsId 是否有效"""
-        if not rmsId or rmsId.isspace():
-            print("错误：rmsId 不能为空或仅包含空白字符")
-            sys.exit(1)
-        return rmsId
+    json_str = json.dumps(data, ensure_ascii=False)
 
-    # 验证 rmsId
-    rmsId = validate_rms_id(rmsId)
+    ret = exe_dify(json_str)
 
-    # 调用原始 get_rms_info 函数
-    result = get_rms_info(rmsId)
-
-    # 结构化打印 result
-    print("Result:")
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    formatted_json = json.dumps(ret, indent=4, ensure_ascii=False)
+    print(formatted_json)
 
     
