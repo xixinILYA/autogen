@@ -134,7 +134,7 @@ get_host_info = HttpTool(
 # 创建 HttpTool，用于调用 Dify 工作流 API 获取成本优化建议
 get_cost_advice = HttpTool(
     name="get_cost_advice",
-    description="根据主机资源使用，主机硬件配置情况，生成成本优化建议（适用于成本分析）",
+    description="根据主机资源使用和主机硬件配置情况，生成成本优化建议（适用于成本分析）",
     scheme="http",
     host=g_dify_workflow_host,
     port=80,
@@ -143,14 +143,32 @@ get_cost_advice = HttpTool(
     json_schema={
         "type": "object",
         "properties": {
-            "cpu_precent": {"type": "number", "description": "CPU使用率"},
-            "mem_precent": {"type": "number", "description": "内存使用率"},
-            "cpu": {"type": "number", "description": "CPU硬件配置"},
-            "mem": {"type": "number", "description": "内存硬件配置"},
-            "machine_type": {"type": "string", "description": "机器类型"},
-            "machine_class": {"type": "string", "description": "机器规格"}
+            "inputs": {
+                "type": "object",
+                "description": "请求的输入参数",
+                "properties": {
+                    "cpu_precent": {"type": "number", "description": "CPU使用率"},
+                    "mem_precent": {"type": "number", "description": "内存使用率"},
+                    "cpu": {"type": "number", "description": "CPU硬件配置"},
+                    "mem": {"type": "number", "description": "内存硬件配置"},
+                    "machine_type": {"type": "string", "description": "机器类型"},
+                    "machine_specification": {"type": "string", "description": "机器规格"}
+                },
+                "required": ["cpu_precent", "mem_precent", "cpu", "mem", "machine_type", "machine_specification"]
+            },
+            "response_mode": {
+                "type": "string",
+                "description": "响应模式",
+                "enum": ["blocking", "streaming"],
+                "default": "blocking"
+            },
+            "user": {
+                "type": "string",
+                "description": "请求发起的用户标识",
+                "default": "pipeline"
+            }
         },
-        "required": ["cpu", "mem", "cpu_precent", "mem_precent", "machine_type", "machine_class"]
+        "required": ["inputs", "response_mode", "user"]
     },
     headers={
         'Authorization': 'Bearer app-0E73Ys4ywhawXOM7LmiGgVqa',
@@ -158,6 +176,7 @@ get_cost_advice = HttpTool(
     },
     return_type="json",
 )
+
 
 # 稳定性相关的 http 工具
 get_stability_info = HttpTool(
