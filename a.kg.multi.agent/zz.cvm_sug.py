@@ -18,8 +18,6 @@ def get_cpu_mem_usage(ip):
     mem_usg = format(float(tmp2["data"][-1]["value"][1]), ".2f") if tmp2['data'] else 'F'
 
     return cpu_usg, mem_usg
-
-
 def get_hardware_specs(ip):
     url = "http://opdproxy.kgidc.cn/b-monitor-metricqueryapi/v1/query?opdAppid=v1-642250a7e5a9a"
     headers = {'Content-Type': 'application/json'}
@@ -36,8 +34,6 @@ def get_hardware_specs(ip):
     mem_hardware = tmp2["data"][0]["values"][0][1] if tmp2['data'] else 'F'
 
     return cpu_hardware, mem_hardware
-
-
 def get_machine_info(ip):
     url = "http://opdproxy.kgidc.cn/b-cmdb-common/v1/base_property/get_data/machine_base"
 
@@ -71,6 +67,7 @@ def get_machine_info(ip):
     machineclass=tmp['data'][0]['machineClass'] if tmp['data'] else 'F'
     return machinetype,machineclass
 
+
 def exe_dify(cpu_usg, mem_usg, cpu_hardware, mem_hardware, machine_type, machine_class):
     d = {
         'cpu_usg': cpu_usg,
@@ -93,9 +90,9 @@ def exe_dify(cpu_usg, mem_usg, cpu_hardware, mem_hardware, machine_type, machine
     else:
         data = {
             "inputs": {
-                "cpu_precent": cpu_usg,
                 "cpu": cpu_hardware,
                 "mem": mem_hardware,
+                "cpu_precent": cpu_usg,
                 "mem_precent": mem_usg,
                 "machine_type": machine_type,
                 "machine_specification": machine_class

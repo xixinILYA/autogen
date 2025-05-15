@@ -25,12 +25,12 @@ logger = logging.getLogger(__name__)
 # 环境配置: 
 # 测试->生产
 if os.getenv("aKl8saxxDh9v7b_Kugou_ML_Namespace_Test") == "breezejiang":
-    g_dify_chatmsg_url = "http://dify.opd.kugou.net/v1/chat-messages"
-    g_aiops_api_url = "http://machinelearning.opd.kugou.net/b-aiops-ml/v1/"
+    g_dify_workflow_host = "dify.opd.kugou.net"
+    g_aiops_api_host = "machinelearning.opd.kugou.net"
 # 生产
 else:
-    g_dify_chatmsg_url = "http://dify.kgidc.cn/v1/chat-messages"
-    g_aiops_api_url = "http://opdproxy.kgidc.cn/b-aiops-ml/v1/"
+    g_dify_workflow_host = "dify.kgidc.cn"
+    g_aiops_api_host = "opdproxy.kgidc.cn"
     
 
 # 大模型 LLM 使用deepseek
@@ -64,15 +64,6 @@ async def get_mcp_tools(server_params: SseServerParams, timeout: float = 30.0) -
         return []
 
 
-# 定义 HttpTool 的 JSON Schema，用于 base64 解码
-base64_schema = {
-    "type": "object",
-    "properties": {
-        "value": {"type": "string", "description": "要解码的 base64 值"},
-    },
-    "required": ["value"],
-}
-
 # 创建 HttpTool，用于访问 httpbin.org 的 base64 解码 API
 base64_tool = HttpTool(
     name="base64_decode",
@@ -82,7 +73,13 @@ base64_tool = HttpTool(
     port=443,
     path="/base64/{value}",
     method="GET",
-    json_schema=base64_schema,
+    json_schema={
+        "type": "object",
+        "properties": {
+            "value": {"type": "string", "description": "要解码的 base64 值"},
+        },
+        "required": ["value"],
+    },
     return_type="text",
 )
 
@@ -109,43 +106,25 @@ file_read_tool = FunctionTool(
     description="读取指定本地文件的内容",
 )
 
-# get_host_info_by_ip 工具的 JSON Schema 定义
-get_host_info_by_ip_schema = {
-    "type": "object",
-    "properties": {
-        "ip": {"type": "string", "description": "要查询的主机IP地址"}
-    },
-    "required": ["ip"]
-}
 
 # 创建 HttpTool，用于访问获取主机信息的API
 get_host_info = HttpTool(
-    name="get_host_info_by_ip",
-    description="根据 IP 地址查询主机的 CPU、内存使用率和硬件配置",
+    name="get_host_info",
+    description="根据 ip 地址查询主机的 CPU、内存使用率和硬件型号",
     scheme="http",
-    # host="your-api-server",  # 替换为实际API服务器地址
-    # port=80,
-    host="192.168.58.14",
-    port=8001,
-    path="/api/hostinfo/{ip}",  # API路径，确保{ip}路径参数被正确处理
+    host=g_aiops_api_host,
+    port=80,
+    path="/b-aiops-ml/v1/GetSshipCpumemInfo?sship={ip}",  # API路径，确保{ip}路径参数被正确处理
     method="GET",
-    json_schema=get_host_info_by_ip_schema,
+    json_schema={
+        "type": "object",
+        "properties": {
+            "ip": {"type": "string", "description": "要查询的主机ip地址"}
+        },
+        "required": ["ip"]
+    },
     return_type="json",
 )
-
-# get_cost_advice 工具的 JSON Schema 定义
-get_cost_advice_schema = {
-    "type": "object",
-    "properties": {
-        "cpu_usg": {"type": "number", "description": "CPU使用率"},
-        "mem_usg": {"type": "number", "description": "内存使用率"},
-        "cpu_hardware": {"type": "number", "description": "CPU硬件配置"},
-        "mem_hardware": {"type": "number", "description": "内存硬件配置"},
-        "machine_type": {"type": "string", "description": "机器类型"},
-        "machine_class": {"type": "string", "description": "机器规格"}
-    },
-    "required": ["cpu_usg", "mem_usg", "cpu_hardware", "mem_hardware", "machine_type", "machine_class"]
-}
 
 
 # 创建 HttpTool，用于调用 Dify 工作流 API 获取成本优化建议
@@ -153,40 +132,30 @@ get_cost_advice = HttpTool(
     name="get_cost_advice",
     description="根据主机资源使用，主机硬件配置情况，生成成本优化建议（适用于成本分析）",
     scheme="http",
-    host="192.168.58.14",
-    port=8001,
+    host=g_dify_workflow_host,
+    port=80,
     path="/v1/workflows/run",
     method="POST",
     json_schema={
         "type": "object",
         "properties": {
-            "cpu_usg": {"type": "number", "description": "CPU使用率"},
-            "mem_usg": {"type": "number", "description": "内存使用率"},
-            "cpu_hardware": {"type": "number", "description": "CPU硬件配置"},
-            "mem_hardware": {"type": "number", "description": "内存硬件配置"},
+            "cpu_precent": {"type": "number", "description": "CPU使用率"},
+            "mem_precent": {"type": "number", "description": "内存使用率"},
+            "cpu": {"type": "number", "description": "CPU硬件配置"},
+            "mem": {"type": "number", "description": "内存硬件配置"},
             "machine_type": {"type": "string", "description": "机器类型"},
-            "machine_class": {"type": "string", "description": "机器规格"},
-            "response_mode": {"type": "string", "default": "blocking"},
-            "user": {"type": "string", "default": "pipeline"}
+            "machine_class": {"type": "string", "description": "机器规格"}
         },
-        "required": ["cpu_usg", "mem_usg", "cpu_hardware", "mem_hardware", "machine_type", "machine_class"]
+        "required": ["cpu", "mem", "cpu_precent", "mem_precent", "machine_type", "machine_class"]
     },
     headers={
-        'Authorization': '{{sk.cvmonlinedify}}',
+        'Authorization': 'Bearer app-0E73Ys4ywhawXOM7LmiGgVqa',
         'Content-Type': 'application/json'
     },
     return_type="json",
 )
 
-
-get_stability_info_schema = {
-    "type": "object",
-    "properties": {
-        "ip": {"type": "string", "description": "目标主机的 IP 地址"}
-    },
-    "required": ["ip"]
-}
-
+# 稳定性相关的 http 工具
 get_stability_info = HttpTool(
     name="get_stability_info",
     description="根据 IP 地址查询主机的稳定性信息，如负载波动、故障率等",
@@ -195,19 +164,17 @@ get_stability_info = HttpTool(
     port=8001,
     path="/api/stability/{ip}",
     method="GET",
-    json_schema=get_stability_info_schema,
+    json_schema={
+        "type": "object",
+        "properties": {
+            "ip": {"type": "string", "description": "目标主机的 IP 地址"}
+        },
+        "required": ["ip"]
+    },
     return_type="json",
 )
 
-
-get_security_info_schema = {
-    "type": "object",
-    "properties": {
-        "ip": {"type": "string", "description": "目标主机的 IP 地址"}
-    },
-    "required": ["ip"]
-}
-
+# 安全相关的 http 工具
 get_security_info = HttpTool(
     name="get_security_info",
     description="根据 IP 地址查询主机的安全信息，如漏洞、入侵检测记录等",
@@ -216,7 +183,13 @@ get_security_info = HttpTool(
     port=8001,
     path="/api/security/{ip}",
     method="GET",
-    json_schema=get_security_info_schema,
+    json_schema={
+        "type": "object",
+        "properties": {
+            "ip": {"type": "string", "description": "目标主机的 IP 地址"}
+        },
+        "required": ["ip"]
+    },
     return_type="json",
 )
 
@@ -244,7 +217,7 @@ async def main():
         system_message="""
             你是负责分析项目资源成本的专家。
             你的职责是：
-            - 调用 get_host_info 等工具获取项目相关的 Redis, K8S, Mysql, 主机CVM 等资源、硬件配置相关的数据；
+            - 调用 get_host_info 等工具获取项目相关的 Redis、K8S、Mysql、主机CVM 等资源、硬件配置相关的数据；
             - 分析成本使用情况，调用 get_cost_advice工具 获取优化建议；
             - 仅使用工具返回的数据作为依据，清晰地陈述你的分析过程、数据来源和最终的优化建议。
 

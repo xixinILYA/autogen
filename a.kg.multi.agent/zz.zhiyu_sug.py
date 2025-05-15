@@ -1,22 +1,30 @@
 import requests
 import json
+import sys
+import argparse
+import traceback
 
+kgidc_host = "opdproxy.kgidc.cn"
+appid = "v1-66b9ca69ed4f3"
+appsecret = "4dbbd4883782f9d0baa29e1f97d82fa8"
 
 def fetch_idc_metrics(rms_id):
     def get_app_running_status():
         url = "http://opdproxy.kgidc.cn/b-cmdb-read/v2/get_app_running_status"
         payload = json.dumps({
             "rmsId": rms_id,
-            "opdAppid": "{{sk.cvmopdAppid}}",
-            "opdAppsecret": "{{sk.cvmopdAppsecret}}"
+            "opdAppid": appid,
+            "opdAppsecret": appsecret
         })
         headers = {'Content-Type': 'application/json'}
         response = requests.post(url, headers=headers, data=payload)
         if response.status_code != 200:
+            print(f"Error in get_rms_info: {response}")
             return None
         try:
             return response.json()
         except json.JSONDecodeError:
+            print(f"Error in get_app_running_status: JSONDecodeError")
             return None
 
     def extract_idc_info(data):
@@ -54,11 +62,13 @@ def fetch_idc_metrics(rms_id):
                 payload = {"metric": metric_query}
                 response = requests.post(url, headers=headers, data=json.dumps(payload))
                 if response.status_code != 200:
+                    print(f"Error in query_metrics: {response}")
                     return None
                 try:
                     response_data = response.json()
                     room_data[metric_type] = response_data['data'][0]['values'][0][1]
                 except (KeyError, IndexError, json.JSONDecodeError):
+                    print(f"Error in query_metrics: JSONDecodeError")
                     return None
 
             room_data["ipList"] = data['ipList']
@@ -75,17 +85,19 @@ def fetch_cluster_config(rms_id):
     url = "http://opdproxy.kgidc.cn/b-cmdb-read/v2/get_app_cluster_config"
     payload = json.dumps({
         "rmsId": rms_id,
-        "opdAppid": "{{sk.cvmopdAppid}}",
-        "opdAppsecret": "{{sk.cvmopdAppsecret}}"
+        "opdAppid": appid,
+        "opdAppsecret": appsecret
     })
     headers = {'Content-Type': 'application/json'}
     response = requests.post(url, headers=headers, data=payload)
     if response.status_code != 200:
+        print(f"Error in fetch_cluster_config: {response}")
         return 'F'
 
     try:
         data = response.json().get('data', [])
     except json.JSONDecodeError:
+        print(f"Error in fetch_cluster_config: JSONDecodeError")
         return 'F'
 
     clusters = []
@@ -103,6 +115,7 @@ def fetch_cluster_config(rms_id):
                     'pod_num': num
                 })
             except KeyError:
+                print(f"Error in fetch_cluster_config: KeyError")
                 return 'F'
     return clusters or 'F'
 
@@ -112,18 +125,20 @@ def get_app_risk_rank(rms_id):
         url = "http://opdproxy.kgidc.cn/b-cmdb-read/v2/get_app_info"
         payload = json.dumps({
             "rmsId": rms_id,
-            "opdAppid": "v1-67c6a3c68ddb7",
-            "opdAppsecret": "6d07ad2423fce2572aeff082a292b1cc"
+            "opdAppid": appid,
+            "opdAppsecret": appsecret
         })
         headers = {'Content-Type': 'application/json'}
 
         response = requests.post(url, headers=headers, data=payload)
         if response.status_code != 200:
+            print(f"Error in get_app_risk_rank: {response}")
             return 'F'
 
         data = response.json()
         return data["data"]["appBaseInfoData"]["riskRank"]
     except Exception:
+        print(f"Error in get_app_risk_rank: Exception")
         return 'F'
 
 
@@ -141,6 +156,7 @@ def get_k8s_resource_usage(projectid, clusterid):
         tmp_cpu = response_cpu.json()
         k8s_cpu_use = round(float(tmp_cpu["data"][0]["value"][1]), 2) if "data" in tmp_cpu and tmp_cpu["data"] else None
     except (requests.RequestException, KeyError, IndexError, ValueError):
+        print(f"Error in get_k8s_resource_usage: Exception")
         k8s_cpu_use = None
 
     try:
@@ -153,6 +169,7 @@ def get_k8s_resource_usage(projectid, clusterid):
         tmp_mem = response_mem.json()
         k8s_mem_use = round(float(tmp_mem["data"][0]["value"][1]), 2) if "data" in tmp_mem and tmp_mem["data"] else None
     except (requests.RequestException, KeyError, IndexError, ValueError):
+        print(f"Error in get_k8s_resource_usage: Exception")
         k8s_mem_use = None
 
     return k8s_cpu_use, k8s_mem_use
@@ -171,11 +188,13 @@ def get_idc_resource_usage(ip_list):
     try:
         cpu_usage = round(float(cpu_response.json()["data"][0]["value"][1]), 2)
     except (KeyError, IndexError, ValueError):
+        print(f"Error in get_idc_resource_usage: Exception")
         cpu_usage = None
 
     try:
         mem_usage = round(float(mem_response.json()["data"][0]["value"][1]), 2)
     except (KeyError, IndexError, ValueError):
+        print(f"Error in get_idc_resource_usage: Exception")
         mem_usage = None
 
     return (cpu_usage, mem_usage)
@@ -195,6 +214,7 @@ def fetch_k8s_metrics(projectid, clusterid):
                     result["data"][0]["value"]) > 1:
                 return round(float(result["data"][0]["value"][1]), 2)
         except (requests.RequestException, KeyError, IndexError, ValueError):
+            print(f"Error in fetch_k8s_metrics: Exception")
             pass
         return None
 
@@ -206,79 +226,107 @@ def fetch_k8s_metrics(projectid, clusterid):
     return cpu_limit, cpu_request, mem_limit, mem_request
 
 
-def exe_dify(data_info):
-    data = {
-        "inputs": {
-            "data_info": data_info,
-        },
-        "response_mode": "blocking",
-        "user": "pipeline"
-    }
+# def exe_dify(data_info):
+#     data = {
+#         "inputs": {
+#             "data_info": data_info,
+#         },
+#         "response_mode": "blocking",
+#         "user": "pipeline"
+#     }
 
-    headers = {
-        'Host': 'dify.kgidc.cn',
-        'Authorization': '{{sk.zhiyudify}}',
-        'Content-Type': 'application/json'
-    }
+#     headers = {
+#         'Host': 'dify.kgidc.cn',
+#         'Authorization': '{{sk.zhiyudify}}',
+#         'Content-Type': 'application/json'
+#     }
 
-    response = requests.post('http://dify.kgidc.cn/v1/workflows/run', headers=headers, json=data)
+#     response = requests.post('http://dify.kgidc.cn/v1/workflows/run', headers=headers, json=data)
 
-    ret = {}
-    if response.status_code != 200:
-        ret["error"] = str(response.content)
-        return ret
-    else:
-        return response.json()
+#     ret = {}
+#     if response.status_code != 200:
+#         ret["error"] = str(response.content)
+#         return ret
+#     else:
+#         return response.json()
 
+
+def get_rms_info(rmsId) -> dict:
+    rms_id = rmsId
+    try:
+        idc_metrics = fetch_idc_metrics(rms_id)
+        if idc_metrics == 'F':
+            idc_metrics = []
+        cluster_config = fetch_cluster_config(rms_id)
+        if cluster_config == 'F':
+            cluster_config = []
+        for cluster in cluster_config:
+            k8s_cpu_use, k8s_mem_use = get_k8s_resource_usage(rms_id, cluster["clusterId"]) or ('', '')
+            cpu_limit, cpu_request, mem_limit, mem_request = fetch_k8s_metrics(rms_id, cluster["clusterId"]) or (
+            '', '', '', '')
+            if not k8s_cpu_use or not k8s_mem_use or not cpu_limit or not cpu_request or not mem_limit or not mem_request:
+                cluster_config.remove(cluster)
+            else:
+                cluster["cpu_limit"] = cpu_limit
+                cluster["cpu_request"] = cpu_request
+                cluster["mem_limit"] = mem_limit
+                cluster["mem_request"] = mem_request
+                cluster["k8s_cpu_use"] = k8s_cpu_use
+                cluster["k8s_mem_use"] = k8s_mem_use
+        for idc in idc_metrics:
+            idc_cpu_use, idc_mem_use = get_idc_resource_usage(idc["ipList"]) or ('', '')
+            idc["idc_cpu_use"] = idc_cpu_use
+            idc["idc_mem_use"] = idc_mem_use
+        rank = get_app_risk_rank(rms_id)
+        if rank == 'F':
+            rank = ''
+        if (idc_metrics or cluster_config) and rms_id and rank :
+            ret = {"idc_info": idc_metrics, "k8s_info": cluster_config, "rank": rank, "rmsId": rms_id}
+            # ret = json.dumps(ret)
+            return {'ret': 0, 'data': ret}
+        else:
+            missing_fields = []
+            if not idc_metrics and not cluster_config:
+                missing_fields.append('idc_info,k8s_info')
+            if not rank:
+                missing_fields.append('rank')
+            if not rms_id:
+                missing_fields.append('rmsId')
+            return {'ret': 1, 'data': '数据未获取成功，未获取成功的数据：' + '，'.join(missing_fields)}
+    except Exception as e:
+        # 添加异常堆栈信息
+        emsg = traceback.format_exc()
+        print(f"Error in get_rms_info: {emsg}")
+        return {'ret': 1, 'data': '数据未获取成功，错误信息：' + str(e)}
+
+
+def parse_args():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description="获取 RMS 信息并格式化输出")
+    parser.add_argument("rmsId", type=str, help="RMS ID，例如 9754")
+    return parser.parse_args()
 
 if __name__ == "__main__":
-    rms_id = rmsId
-    idc_metrics = fetch_idc_metrics(rms_id)
-    if idc_metrics == 'F':
-        idc_metrics = []
-    cluster_config = fetch_cluster_config(rms_id)
-    if cluster_config == 'F':
-        cluster_config = []
-    for cluster in cluster_config:
-        k8s_cpu_use, k8s_mem_use = get_k8s_resource_usage(rms_id, cluster["clusterId"]) or ('', '')
-        cpu_limit, cpu_request, mem_limit, mem_request = fetch_k8s_metrics(rms_id, cluster["clusterId"]) or (
-        '', '', '', '')
-        if not k8s_cpu_use or not k8s_mem_use or not cpu_limit or not cpu_request or not mem_limit or not mem_request:
-            cluster_config.remove(cluster)
-        else:
-            cluster["cpu_limit"] = cpu_limit
-            cluster["cpu_request"] = cpu_request
-            cluster["mem_limit"] = mem_limit
-            cluster["mem_request"] = mem_request
-            cluster["k8s_cpu_use"] = k8s_cpu_use
-            cluster["k8s_mem_use"] = k8s_mem_use
-    for idc in idc_metrics:
-        idc_cpu_use, idc_mem_use = get_idc_resource_usage(idc["ipList"]) or ('', '')
-        idc["idc_cpu_use"] = idc_cpu_use
-        idc["idc_mem_use"] = idc_mem_use
-    rank = get_app_risk_rank(rms_id)
-    if rank == 'F':
-        rank = ''
-    if (idc_metrics or cluster_config) and rms_id and rank :
-        ret = {"idc_info": idc_metrics, "k8s_info": cluster_config, "rank": rank, "rmsId": rms_id}
-        ret = json.dumps(ret)
-        res = exe_dify(ret)
-        final_answer = res['data']['outputs']['final_answer']
-        print('AI分析:')
-        for line in final_answer.split('\n'):
-            print(line)
-        print('\n')
-        detail = res['data']['outputs']['detail']
-        print('AI分析详情:')
-        for line in detail.split('\n'):
-            print(line)
-    else:
-        missing_fields = []
-        if not idc_metrics and not cluster_config:
-            missing_fields.append('idc_info,k8s_info')
-        if not rank:
-            missing_fields.append('rank')
-        if not rms_id:
-            missing_fields.append('rmsId')
-        print('数据未获取成功，未获取成功的数据：' + '，'.join(missing_fields))
-        
+    """主函数，处理 RMS 信息查询和输出"""
+    # 解析命令行参数
+    args = parse_args()
+    rmsId = args.rmsId
+
+    def validate_rms_id(rmsId):
+        """验证 rmsId 是否有效"""
+        if not rmsId or rmsId.isspace():
+            print("错误：rmsId 不能为空或仅包含空白字符")
+            sys.exit(1)
+        return rmsId
+
+    # 验证 rmsId
+    rmsId = validate_rms_id(rmsId)
+
+    # 调用原始 get_rms_info 函数
+    result = get_rms_info(rmsId)
+
+    # 结构化打印 result
+    print("Result:")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+    
