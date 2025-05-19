@@ -31,12 +31,14 @@ logger = logging.getLogger(__name__)
 # 环境配置: 
 # 测试->生产
 if os.getenv("aKl8saxxDh9v7b_Kugou_ML_Namespace_Test") == "breezejiang":
-    g_dify_workflow_host = "dify.opd.kugou.net"
+    g_dify_workflow_host = "2dify.opd.kugou.net"
     g_aiops_api_host = "machinelearning.opd.kugou.net"
+    g_model_base_url = "https://api.lkeap.cloud.tencent.com/v1"
 # 生产
 else:
     g_dify_workflow_host = "dify.kgidc.cn"
     g_aiops_api_host = "opdproxy.kgidc.cn"
+    g_model_base_url = "http://10.5.140.80:8880/v1/chat/completions"
     
 
 # 大模型 LLM 使用deepseek
@@ -54,7 +56,7 @@ if not G_DEEPSEEK_KEY:
 
 model_client = OpenAIChatCompletionClient(
     model="deepseek-v3",
-    base_url="https://api.lkeap.cloud.tencent.com/v1",
+    base_url=g_model_base_url,
     api_key=G_DEEPSEEK_KEY,
     model_info={"vision": False, "function_calling": True, "structured_output": True, "json_output": True, "family": "unknown"}
 )
@@ -338,7 +340,7 @@ async def main():
         tools=mcp_cost_tools + [get_rmsid_info, get_host_info, get_cost_advice],
         description="分析项目成本并给出优化建议，能够获取项目资源信息、调用成本分析服务",
         system_message="""
-            你是负责分析项目资源成本的专家。你的每次分析回复**最后一行必须输出“任务完成”、“任务未完成”、“任务终止”**。
+            你是负责分析项目资源成本的专家。你的每次分析回复最后一行必须输出“任务完成”、“任务未完成”、“任务终止”。
             你的职责是：
             - 首先调用 get_rmsid_info 工具获取项目汇总信息；
             - 然后调用 get_host_info 工具(参数来自 get_rmsid_info 响应的 ipList 列表)获取项目相关的 Redis、K8S、Mysql、主机CVM 等资源、硬件配置相关的数据；
@@ -360,7 +362,7 @@ async def main():
         tools=mcp_stability_tools + [get_rmsid_info, get_stability_advice],
         description="评估项目稳定性并给出处置建议",
         system_message="""
-            你是负责评估系统稳定性的专家。你的每次分析回复**最后一行必须输出“任务完成”、“任务未完成”、“任务终止”**。
+            你是负责评估系统稳定性的专家。你的每次分析回复最后一行必须输出“任务完成”、“任务未完成”、“任务终止”。
             你的职责是：
             - 调用 get_rmsid_info 工具获取项目信息；调用 get_stability_advice 工具 (参数 data_info 是 get_rmsid_info 响应的 data 的 dumps 字符串) 获取项目相关的 日志、告警、故障记录等；
             - 分析日志、告警、故障记录等评估系统是否存在不稳定风险；
@@ -381,7 +383,7 @@ async def main():
         tools=mcp_security_tools + [get_security_info],
         description="评估项目安全性并给出处置建议",
         system_message="""
-            你是负责评估系统安全性的专家。你的每次分析回复**最后一行必须输出“任务完成”、“任务未完成”、“任务终止”**。
+            你是负责评估系统安全性的专家。你的每次分析回复最后一行必须输出“任务完成”、“任务未完成”、“任务终止”。
             你的职责是：
             - 调用 get_security_info 等工具获取项目相关的配置文件、访问权限和漏洞等安全信息；
             - **严格根据工具返回的数据**进行分析；
