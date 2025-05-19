@@ -1,12 +1,29 @@
 import asyncio
 import os
+import logging
 from typing import Sequence
+from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.teams import SelectorGroupChat
 from autogen_agentchat.conditions import TextMentionTermination
 from autogen_agentchat.ui import Console
-from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage
+
+
+
+# Logging config
+# 获取当前 Python 文件名（不带路径和扩展名）
+file_name = os.path.splitext(os.path.basename(__file__))[0]
+log_file = f'{file_name}.log'
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(log_file)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
@@ -60,7 +77,7 @@ async def main() -> None:
     team = SelectorGroupChat(
         [agent1, agent2],
         model_client=model_client,
-        # selector_func=selector_func,
+        selector_func=selector_func,
         termination_condition=termination,
     )
 

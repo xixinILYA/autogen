@@ -2,6 +2,8 @@ import asyncio
 import os
 import sys
 import logging
+from typing import Sequence
+from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_ext.tools.mcp import SseServerParams, mcp_server_tools
 from autogen_agentchat.agents import AssistantAgent
@@ -43,12 +45,20 @@ if not G_DEEPSEEK_KEY:
     logger.error("DPSK_KEY environment variable not set")
     sys.exit(1)
 
+# model_client = OpenAIChatCompletionClient(
+#     model="deepseek-chat",
+#     base_url="https://api.deepseek.com",
+#     api_key=G_DEEPSEEK_KEY,
+#     model_info={"vision": False, "function_calling": True, "structured_output": True, "json_output": True, "family": "unknown"}
+# )
+
 model_client = OpenAIChatCompletionClient(
-    model="deepseek-chat",
-    base_url="https://api.deepseek.com",
+    model="deepseek-v3",
+    base_url="https://api.lkeap.cloud.tencent.com/v1",
     api_key=G_DEEPSEEK_KEY,
     model_info={"vision": False, "function_calling": True, "structured_output": True, "json_output": True, "family": "unknown"}
 )
+
 
 # 工具列表定义：Tool definitions
 async def get_mcp_tools(server_params: SseServerParams, timeout: float = 30.0) -> list:
@@ -262,6 +272,51 @@ get_security_info = HttpTool(
 )
 
 
+def selector_func_core(messages: Sequence[BaseAgentEvent | BaseChatMessage]) -> str | None:
+    # 你的 agent 名字
+    analysis_agents = ["cost_analyst", "stability_analyst", "security_analyst"]
+    report_agent = "report_generator"
+
+    # 1. 找到每个 agent 最近一次回复
+    latest_reply = {agent: None for agent in analysis_agents + [report_agent]}
+    for msg in reversed(messages):
+        name = getattr(msg, "source", None)
+        if name in latest_reply and latest_reply[name] is None:
+            content = msg.to_text() if hasattr(msg, "to_text") else str(getattr(msg, "content", ""))
+            latest_reply[name] = content
+
+    # 2. 哪些分析专家没“完成/终止”
+    waiting_agents = [
+        agent for agent in analysis_agents
+        if not (latest_reply[agent] or "").strip().endswith(("任务完成", "任务终止", "任务完成.", "任务终止.", "任务完成。", "任务终止。"))
+    ]
+    if waiting_agents:
+        # 优先顺序可自定义，这里 cost > stability > security
+        return waiting_agents[0]
+
+    # # 3. 检查有无分析 agent 报告内容里有“冲突”或“矛盾”
+    # for agent in analysis_agents:
+    #     content = (latest_reply[agent] or "")
+    #     if "冲突" in content or "矛盾" in content:
+    #         return agent  # 让有冲突的分析 agent 继续讨论
+
+    # # 4. 都完成且无冲突，进入报告生成
+    # return report_agent
+
+    # 其余场景，让大模型选择
+    return None
+
+
+def selector_func(messages: Sequence[BaseAgentEvent | BaseChatMessage]) -> str | None:
+    try:
+        agent = selector_func_core(messages)
+        logger.warning(f"----------------->>>> Selector function returned: {agent}")
+        return agent
+    except Exception as e:
+        logger.error(f"----------------->>>> Selector function returned: None, use selector_prompt")
+        return None
+
+
 async def main():
     local_server_params = SseServerParams(url="http://192.168.58.14:8400/sse", headers={"Content-Type": "application/json"}, timeout=10)
     server_params = SseServerParams(
@@ -285,9 +340,9 @@ async def main():
         system_message="""
             你是负责分析项目资源成本的专家。你的每次分析回复**最后一行必须输出“任务完成”、“任务未完成”、“任务终止”**。
             你的职责是：
-            - 首先调用 get_rmsid_info 工具获取项目信息；
+            - 首先调用 get_rmsid_info 工具获取项目汇总信息；
             - 然后调用 get_host_info 工具(参数来自 get_rmsid_info 响应的 ipList 列表)获取项目相关的 Redis、K8S、Mysql、主机CVM 等资源、硬件配置相关的数据；
-            - 最后调用 get_cost_advice 工具(参数来自 get_rmsid_info 响应) 获取优化建议；
+            - 最后调用 get_cost_advice 工具(参数来自 get_host_info 响应) 获取优化建议；
             - 仅使用工具返回的数据作为依据，清晰地陈述你的分析过程、数据来源和最终的优化结论；
             - 工具未调用完，最后一行回复 “任务未完成”；
             - 工具调用异常或数据缺失，最后一行回复 “任务终止”；
@@ -362,8 +417,9 @@ async def main():
         participants=[cost_agent, stability_agent, security_agent, report_generator],
         model_client=model_client,
         termination_condition=termination,
+        selector_func=selector_func,
         allow_repeated_speaker=True,
-        max_turns=15,
+        max_turns=25,
         # selector_prompt = """
         #     你正在参与一个软件架构评审任务，团队由多个专家角色组成，每个角色有其明确的职责。
 
@@ -428,7 +484,7 @@ async def main():
             1.  **未发言者优先**: 如果参与者列表中有专家（非 report_generator）尚未发言，从中选择一位。
             2.  **响应直接请求**: 如果上一位专家指名要求特定角色 (例如 "@security_agent, 请你分析一下...") 发言，则选择被指名的角色。
             3.  **避免无效参与**: 如果某个角色明确表示 “任务已完成”、“任务终止”、“没有其他意见”或类似表述，则在当前分析阶段不再选择该角色。
-            4.  **推动任务进展**: 如果某个发言者尚未表示 “任务已完成”、“任务终止”，则继续选择该角色发言。
+            4.  **推动任务进展**: 如果某个发言者还没有回复 “任务已完成”、“任务终止”，则继续选择该角色发言。
             5.  **报告生成阶段**:
                 * **前提条件**: 仅当所有分析专家（cost_analyst、stability_analyst、security_analyst）最近一次回复的最后一行为“任务已完成”或“任务终止”时，才可以选择 report_generator 进入综合汇总阶段。否则，优先继续选择尚未完成任务的分析专家发言。
                 * **冲突解决指示 (重要)**: 如果分析专家之间存在明显未解决的观点冲突 (例如，成本优化建议显著降低了安全性，且未达成共识)，则**不得**选择 report_generator。此时，应优先选择能够调和冲突或对争议点提供进一步澄清的分析专家。
@@ -448,6 +504,7 @@ async def main():
 
     # 执行任务
     rmsid = 10252
+    # rmsid = 10272
     task = f"""
         你们是一个虚拟专家团队，当前任务是对一个软件开发项目进行联合评估。
         【项目关键信息】：该项目的 rmsid 是 {rmsid}, 请将此 rmsid 作为你们分析的起点和核心关注点。
