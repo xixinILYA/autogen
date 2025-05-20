@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # 环境配置: 
 # 测试->生产
 if os.getenv("aKl8saxxDh9v7b_Kugou_ML_Namespace_Test") == "breezejiang":
-    g_dify_workflow_host = "2dify.opd.kugou.net"
+    g_dify_workflow_host = "dify.opd.kugou.net"
     g_aiops_api_host = "machinelearning.opd.kugou.net"
     g_model_base_url = "https://api.lkeap.cloud.tencent.com/v1"
 # 生产
@@ -274,12 +274,31 @@ get_security_info = HttpTool(
 )
 
 
-def selector_func_core(messages: Sequence[BaseAgentEvent | BaseChatMessage]) -> str | None:
-    # 你的 agent 名字
+def is_tool_fail(msg) -> bool:
+    # 针对 ToolCallExecutionEvent
+    if getattr(msg, "type", None) == "ToolCallExecutionEvent":
+        content = getattr(msg, "content", None)
+        if isinstance(content, list):
+            # 只要有一个 is_error=True
+            return any(getattr(x, "is_error", False) for x in content)
+        # 如果 content 本身有 is_error
+        if hasattr(content, "is_error"):
+            return getattr(content, "is_error")
+    elif getattr(msg, "type", None) == "ToolCallSummaryMessage":
+        content = getattr(msg, "content", None)
+        if content in ("", "\n", None, "null"):
+            return True
+    # 兼容性兜底
+    elif  hasattr(msg, "is_error") and getattr(msg, "is_error"):
+        return True
+    else:
+        return False
+
+
+def selector_func_core(messages: Sequence[BaseAgentEvent | BaseChatMessage], max_failures=2) -> str | None:
     analysis_agents = ["cost_analyst", "stability_analyst", "security_analyst"]
     report_agent = "report_generator"
 
-    # 1. 找到每个 agent 最近一次回复
     latest_reply = {agent: None for agent in analysis_agents + [report_agent]}
     for msg in reversed(messages):
         name = getattr(msg, "source", None)
@@ -287,32 +306,39 @@ def selector_func_core(messages: Sequence[BaseAgentEvent | BaseChatMessage]) -> 
             content = msg.to_text() if hasattr(msg, "to_text") else str(getattr(msg, "content", ""))
             latest_reply[name] = content
 
-    # 2. 哪些分析专家没“完成/终止”
+    # 检查有无 agent 没“完成/终止”
     waiting_agents = [
         agent for agent in analysis_agents
         if not (latest_reply[agent] or "").strip().endswith(("任务完成", "任务终止", "任务完成.", "任务终止.", "任务完成。", "任务终止。"))
     ]
-    if waiting_agents:
-        # 优先顺序可自定义，这里 cost > stability > security
-        return waiting_agents[0]
+    if not waiting_agents:
+        return None
 
-    # # 3. 检查有无分析 agent 报告内容里有“冲突”或“矛盾”
-    # for agent in analysis_agents:
-    #     content = (latest_reply[agent] or "")
-    #     if "冲突" in content or "矛盾" in content:
-    #         return agent  # 让有冲突的分析 agent 继续讨论
+    # 按顺序轮询每个 agent
+    for current_agent in waiting_agents:
+        # 检查最近消息里是否连续多次工具调用失败
+        fail_count = 0
+        for msg in reversed(messages):
+            if getattr(msg, "source", None) != current_agent:
+                continue
+            if is_tool_fail(msg):
+                logger.warning(f"----------------->>>> {current_agent} fail: {msg}")
+                fail_count += 1
+            else:
+                break   # 一旦遇到不是失败，停止统计
+        if fail_count >= max_failures:
+            logger.warning(f"{current_agent} fail_count: {fail_count}, skip {current_agent}")
+            continue    # 本轮跳过，试下一个 agent
+        return current_agent
 
-    # # 4. 都完成且无冲突，进入报告生成
-    # return report_agent
-
-    # 其余场景，让大模型选择
+    # 所有 waiting_agents 都连续失败超过上限，交给大模型选择
     return None
 
 
 def selector_func(messages: Sequence[BaseAgentEvent | BaseChatMessage]) -> str | None:
     try:
         agent = selector_func_core(messages)
-        logger.warning(f"----------------->>>> Selector function returned: {agent}")
+        logger.info(f"----------------->>>> Selector function returned: {agent}")
         return agent
     except Exception as e:
         logger.error(f"----------------->>>> Selector function returned: None, use selector_prompt")
@@ -386,10 +412,8 @@ async def main():
             你是负责评估系统安全性的专家。你的每次分析回复最后一行必须输出“任务完成”、“任务未完成”、“任务终止”。
             你的职责是：
             - 调用 get_security_info 等工具获取项目相关的配置文件、访问权限和漏洞等安全信息；
-            - **严格根据工具返回的数据**进行分析；
             - 如果工具返回的信息不足或返回错误，应明确说明“安全信息缺失”或具体错误，最后一行回复 “任务终止”；
-            - 仅当获取到明确有效的安全信息（如具体漏洞或入侵事件）时，才提供针对性的风险提示和修复建议；
-            - **绝对避免自由发挥或过度假设，尤其是在缺乏数据时**。
+            - 仅当调用的工具获取到明确有效的安全信息（如具体漏洞或入侵事件）时，才提供针对性的风险提示和修复建议。
 
             注意：
             - 你的职责仅限于“安全性分析”；
@@ -422,57 +446,6 @@ async def main():
         selector_func=selector_func,
         allow_repeated_speaker=True,
         max_turns=25,
-        # selector_prompt = """
-        #     你正在参与一个软件架构评审任务，团队由多个专家角色组成，每个角色有其明确的职责。
-
-        #     【角色职责】：
-        #     {roles}
-
-        #     【任务目标】：
-        #     从成本、稳定性、安全性等多个维度完成分析，最终由报告生成专家（report_generator）汇总形成最终报告。
-
-        #     【发言规则（按优先级排序）】：
-        #     1. 如果有角色尚未发言，优先选择这些角色继续分析；
-        #     2. 如果当前角色指定征求某个角色的意见，则选择被征求意见的角色发言；
-        #     3. 如果某个角色声明'无法完成任务'或者'没其他意见'时，则不再选择该角色；
-        #     4. 选择最能有效推动话题深入的角色发言，但要避免重复发言或空转；
-        #     5. 仅当所有分析角色（cost_analyst / stability_analyst / security_analyst）都已完成任务（至少发言一次），且内容没有冲突时，才可选择 report_generator 开始汇总；
-            
-
-        #     【当前对话历史】：
-        #     {history}
-
-        #     请根据【当前对话历史】以及【发言规则（按优先级排序）】，从参与者列表 {participants} 中选择下一个发言角色。
-        #     只返回该角色名，不要输出其他内容。"""
-
-
-        # selector_prompt = """
-        # 你是一个智能调度器，负责引导一个软件架构评审多专家团队完成高效讨论并生成最终报告。
-
-        # 【角色说明】
-        # {roles}
-
-        # 【任务目标】
-        # 围绕“成本、稳定性、安全性”三个维度分析软件架构，最终由 report_generator 整合各专家意见生成完整报告。
-
-        # 【发言选择规则（按优先级）】
-        # 1. 有分析专家尚未发言 → 优先从中选择，按顺序 cost → stability → security；
-        # 2. 若上一发言者明确 @某角色 → 优先选择该角色；
-        # 3. 若角色声明“已完成”或“无其他意见” → 当前阶段不再选择；
-        # 4. 若某分析维度未覆盖或存争议 → 选择能补充或澄清的专家；
-        # 5. 禁止重复选择刚发言的角色，除非被请求或需澄清；
-        # 6. 仅在所有分析专家都已发言并确认完成分析、无冲突时 → 才选择 report_generator 汇总；
-        # 7. 若存在冲突（如成本与安全互斥） → 优先选择相关分析专家继续沟通，不得调用 report_generator。
-
-        # 【对话历史】
-        # {history}
-
-        # 【参与者列表】
-        # {participants}
-
-        # 请只返回下一个发言角色名称（如：cost_agent），不包含其他内容。
-        # """
-
         selector_prompt = """
             你是一个智能调度器，负责在一个软件架构评审的多专家团队中选择下一个发言者。
 
@@ -486,7 +459,7 @@ async def main():
             1.  **未发言者优先**: 如果参与者列表中有专家（非 report_generator）尚未发言，从中选择一位。
             2.  **响应直接请求**: 如果上一位专家指名要求特定角色 (例如 "@security_agent, 请你分析一下...") 发言，则选择被指名的角色。
             3.  **避免无效参与**: 如果某个角色明确表示 “任务已完成”、“任务终止”、“没有其他意见”或类似表述，则在当前分析阶段不再选择该角色。
-            4.  **推动任务进展**: 如果某个发言者还没有回复 “任务已完成”、“任务终止”，则继续选择该角色发言。
+            4.  **推动任务进展**: 如果某个发言者还没有表示 “任务已完成”、“任务终止”，则继续选择该角色发言。
             5.  **报告生成阶段**:
                 * **前提条件**: 仅当所有分析专家（cost_analyst、stability_analyst、security_analyst）最近一次回复的最后一行为“任务已完成”或“任务终止”时，才可以选择 report_generator 进入综合汇总阶段。否则，优先继续选择尚未完成任务的分析专家发言。
                 * **冲突解决指示 (重要)**: 如果分析专家之间存在明显未解决的观点冲突 (例如，成本优化建议显著降低了安全性，且未达成共识)，则**不得**选择 report_generator。此时，应优先选择能够调和冲突或对争议点提供进一步澄清的分析专家。
